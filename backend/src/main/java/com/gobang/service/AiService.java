@@ -4,6 +4,7 @@ import com.gobang.model.GameState;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
+import java.util.regex.Pattern;
 
 @Service
 public class AiService {
@@ -13,6 +14,26 @@ public class AiService {
     private static final int WHITE = GameState.WHITE;
 
     private static final int[][] DIRECTIONS = {{0, 1}, {1, 0}, {1, 1}, {1, -1}};
+    private static final int WINDOW = 6;
+
+    private static final Pattern[] LIVE_FOUR_PATTERNS = {
+        Pattern.compile("011110"),
+    };
+
+    private static final Pattern[] FOUR_PATTERNS = {
+        Pattern.compile("11110"), Pattern.compile("01111"),
+        Pattern.compile("11011"), Pattern.compile("10111"), Pattern.compile("11101"),
+        Pattern.compile("100111"), Pattern.compile("111001"),
+        Pattern.compile("101011"), Pattern.compile("110101"),
+        Pattern.compile("101101"),
+    };
+
+    private static final Pattern[] LIVE_THREE_PATTERNS = {
+        Pattern.compile("0011100"), Pattern.compile("001110"), Pattern.compile("011100"),
+        Pattern.compile("0101100"), Pattern.compile("0011010"),
+        Pattern.compile("0110100"), Pattern.compile("0010110"),
+        Pattern.compile("0100110"), Pattern.compile("0110010"),
+    };
 
     private static final int FIVE = 1000000;
     private static final int LIVE_FOUR = 100000;
@@ -23,6 +44,141 @@ public class AiService {
     private static final int DEAD_TWO = 100;
     private static final int LIVE_ONE = 100;
     private static final int DEAD_ONE = 10;
+
+    private static boolean matchAny(String s, Pattern[] patterns) {
+        for (Pattern p : patterns) {
+            if (p.matcher(s).find()) return true;
+        }
+        return false;
+    }
+
+    private static String extractLine(int[][] board, int row, int col, int dr, int dc, int player) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = -WINDOW; i <= WINDOW; i++) {
+            int r = row + i * dr;
+            int c = col + i * dc;
+            if (r < 0 || r >= BOARD_SIZE || c < 0 || c >= BOARD_SIZE) {
+                sb.append('2');
+            } else if (board[r][c] == EMPTY) {
+                sb.append('0');
+            } else if (board[r][c] == player) {
+                sb.append('1');
+            } else {
+                sb.append('2');
+            }
+        }
+        return sb.toString();
+    }
+
+    private static int countStonesInLine(int[][] board, int row, int col, int dr, int dc, int player) {
+        int count = 1;
+        int r = row + dr, c = col + dc;
+        while (inBounds(r, c) && board[r][c] == player) {
+            count++; r += dr; c += dc;
+        }
+        r = row - dr; c = col - dc;
+        while (inBounds(r, c) && board[r][c] == player) {
+            count++; r -= dr; c -= dc;
+        }
+        return count;
+    }
+
+    private static boolean hasFiveAt(int[][] board, int row, int col, int player) {
+        for (int[] dir : DIRECTIONS) {
+            if (countStonesInLine(board, row, col, dir[0], dir[1], player) == 5) return true;
+        }
+        return false;
+    }
+
+    private static boolean hasOverlineAt(int[][] board, int row, int col, int player) {
+        for (int[] dir : DIRECTIONS) {
+            if (countStonesInLine(board, row, col, dir[0], dir[1], player) >= 6) return true;
+        }
+        return false;
+    }
+
+    private static int countFoursAt(int[][] board, int row, int col, int player) {
+        int count = 0;
+        for (int[] dir : DIRECTIONS) {
+            String line = extractLine(board, row, col, dir[0], dir[1], player);
+            if (matchAny(line, FOUR_PATTERNS) || matchAny(line, LIVE_FOUR_PATTERNS)) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private static boolean isTrueLiveThree(int[][] board, int row, int col, int dr, int dc, int player) {
+        for (int i = -5; i <= 5; i++) {
+            int r = row + i * dr;
+            int c = col + i * dc;
+            if (!inBounds(r, c)) continue;
+            if (board[r][c] != EMPTY) continue;
+            board[r][c] = player;
+            String lineAfter = extractLine(board, row, col, dr, dc, player);
+            boolean foundLiveFour = false;
+            if (matchAny(lineAfter, LIVE_FOUR_PATTERNS)) {
+                foundLiveFour = true;
+            } else if (matchAny(lineAfter, FOUR_PATTERNS)) {
+                outer:
+                for (int j = -5; j <= 5; j++) {
+                    int r2 = row + j * dr;
+                    int c2 = col + j * dc;
+                    if (!inBounds(r2, c2)) continue;
+                    if (board[r2][c2] != EMPTY) continue;
+                    board[r2][c2] = player;
+                    if (countStonesInLine(board, r2, c2, dr, dc, player) == 5) {
+                        board[r2][c2] = EMPTY;
+                        continue;
+                    }
+                    String l2 = extractLine(board, r, c, dr, dc, player);
+                    if (matchAny(l2, LIVE_FOUR_PATTERNS)) {
+                        foundLiveFour = true;
+                    }
+                    board[r2][c2] = EMPTY;
+                    if (foundLiveFour) break outer;
+                }
+            }
+            board[r][c] = EMPTY;
+            if (foundLiveFour) return true;
+        }
+        return false;
+    }
+
+    private static int countLiveThreesAt(int[][] board, int row, int col, int player) {
+        int count = 0;
+        for (int[] dir : DIRECTIONS) {
+            String line = extractLine(board, row, col, dir[0], dir[1], player);
+            if (matchAny(line, LIVE_THREE_PATTERNS)) {
+                int[][] bCopy = new int[BOARD_SIZE][BOARD_SIZE];
+                for (int r = 0; r < BOARD_SIZE; r++) {
+                    System.arraycopy(board[r], 0, bCopy[r], 0, BOARD_SIZE);
+                }
+                if (isTrueLiveThree(bCopy, row, col, dir[0], dir[1], player)) {
+                    count++;
+                }
+            }
+        }
+        return count;
+    }
+
+    private static boolean isForbiddenMove(int[][] board, int row, int col, int player) {
+        if (player != BLACK) return false;
+        if (board[row][col] != EMPTY) return false;
+
+        int[][] boardCopy = new int[BOARD_SIZE][BOARD_SIZE];
+        for (int r = 0; r < BOARD_SIZE; r++) {
+            System.arraycopy(board[r], 0, boardCopy[r], 0, BOARD_SIZE);
+        }
+        boardCopy[row][col] = player;
+
+        if (hasFiveAt(boardCopy, row, col, player)) return false;
+        if (hasOverlineAt(boardCopy, row, col, player)) return true;
+        if (countFoursAt(boardCopy, row, col, player) >= 2) return true;
+        if (countLiveThreesAt(boardCopy, row, col, player) >= 2) return true;
+
+        return false;
+    }
 
     public int[] getBestMove(int[][] board, int aiPlayer, int depth) {
         List<int[]> candidates = getCandidateMoves(board, aiPlayer);
@@ -110,13 +266,23 @@ public class AiService {
         return aiScore - (int)(humanScore * 1.1);
     }
 
-    private int evaluateLine(int[][] board, int row, int col, int dr, int dc, int player) {
-        int fwd = countDirection(board, row, col, dr, dc, player);
-        int bwd = countDirection(board, row, col, -dr, -dc, player);
-        int count = 1 + fwd + bwd;
+    private int countDirection(int[][] board, int row, int col, int dr, int dc, int player) {
+        int count = 0;
+        int r = row + dr, c = col + dc;
+        while (inBounds(r, c) && board[r][c] == player) {
+            count++;
+            r += dr;
+            c += dc;
+        }
+        return count;
+    }
 
+    private int evaluateLine(int[][] board, int row, int col, int dr, int dc, int player) {
+        int count = 1 + countDirection(board, row, col, dr, dc, player) + countDirection(board, row, col, -dr, -dc, player);
         if (count >= 5) return FIVE;
 
+        int fwd = countDirection(board, row, col, dr, dc, player);
+        int bwd = countDirection(board, row, col, -dr, -dc, player);
         boolean fwdBlocked = !inBounds(row + dr * (fwd + 1), col + dc * (fwd + 1)) || board[row + dr * (fwd + 1)][col + dc * (fwd + 1)] != EMPTY;
         boolean bwdBlocked = !inBounds(row - dr * (bwd + 1), col - dc * (bwd + 1)) || board[row - dr * (bwd + 1)][col - dc * (bwd + 1)] != EMPTY;
 
@@ -129,18 +295,7 @@ public class AiService {
         return openEnds == 2 ? LIVE_ONE : DEAD_ONE;
     }
 
-    private int countDirection(int[][] board, int row, int col, int dr, int dc, int player) {
-        int count = 0;
-        int r = row + dr, c = col + dc;
-        while (inBounds(r, c) && board[r][c] == player) {
-            count++;
-            r += dr;
-            c += dc;
-        }
-        return count;
-    }
-
-    private boolean inBounds(int r, int c) {
+    private static boolean inBounds(int r, int c) {
         return r >= 0 && r < BOARD_SIZE && c >= 0 && c < BOARD_SIZE;
     }
 
@@ -149,115 +304,6 @@ public class AiService {
             int count = 1 + countDirection(board, row, col, dir[0], dir[1], player) + countDirection(board, row, col, -dir[0], -dir[1], player);
             if (count >= 5) return true;
         }
-        return false;
-    }
-
-    private boolean hasFiveAt(int[][] board, int row, int col, int player) {
-        for (int[] dir : DIRECTIONS) {
-            int count = 1 + countDirection(board, row, col, dir[0], dir[1], player) + countDirection(board, row, col, -dir[0], -dir[1], player);
-            if (count == 5) return true;
-        }
-        return false;
-    }
-
-    private boolean hasOverlineAt(int[][] board, int row, int col, int player) {
-        for (int[] dir : DIRECTIONS) {
-            int count = 1 + countDirection(board, row, col, dir[0], dir[1], player) + countDirection(board, row, col, -dir[0], -dir[1], player);
-            if (count >= 6) return true;
-        }
-        return false;
-    }
-
-    private boolean isLiveThreeAt(int[][] board, int row, int col, int dr, int dc, int player) {
-        int fwd = countDirection(board, row, col, dr, dc, player);
-        int bwd = countDirection(board, row, col, -dr, -dc, player);
-        int count = 1 + fwd + bwd;
-
-        if (count != 3) return false;
-
-        int fwdR = row + dr * (fwd + 1);
-        int fwdC = col + dc * (fwd + 1);
-        int bwdR = row - dr * (bwd + 1);
-        int bwdC = col - dc * (bwd + 1);
-
-        boolean fwdEmpty = inBounds(fwdR, fwdC) && board[fwdR][fwdC] == EMPTY;
-        boolean bwdEmpty = inBounds(bwdR, bwdC) && board[bwdR][bwdC] == EMPTY;
-
-        if (!fwdEmpty || !bwdEmpty) return false;
-
-        int fwd2R = row + dr * (fwd + 2);
-        int fwd2C = col + dc * (fwd + 2);
-        int bwd2R = row - dr * (bwd + 2);
-        int bwd2C = col - dc * (bwd + 2);
-
-        boolean fwd2Empty = inBounds(fwd2R, fwd2C) && board[fwd2R][fwd2C] == EMPTY;
-        boolean bwd2Empty = inBounds(bwd2R, bwd2C) && board[bwd2R][bwd2C] == EMPTY;
-
-        if (fwd2Empty && bwd2Empty) return true;
-
-        if (fwd == 0 && bwd == 2) {
-            if (bwd2Empty && fwdEmpty) return true;
-        }
-        if (bwd == 0 && fwd == 2) {
-            if (fwd2Empty && bwdEmpty) return true;
-        }
-
-        return false;
-    }
-
-    private int countLiveThreesAt(int[][] board, int row, int col, int player) {
-        int count = 0;
-        for (int[] dir : DIRECTIONS) {
-            if (isLiveThreeAt(board, row, col, dir[0], dir[1], player)) {
-                count++;
-            }
-        }
-        return count;
-    }
-
-    private boolean isFourAt(int[][] board, int row, int col, int dr, int dc, int player) {
-        int fwd = countDirection(board, row, col, dr, dc, player);
-        int bwd = countDirection(board, row, col, -dr, -dc, player);
-        int count = 1 + fwd + bwd;
-
-        if (count != 4) return false;
-
-        int fwdR = row + dr * (fwd + 1);
-        int fwdC = col + dc * (fwd + 1);
-        int bwdR = row - dr * (bwd + 1);
-        int bwdC = col - dc * (bwd + 1);
-
-        boolean fwdEmpty = inBounds(fwdR, fwdC) && board[fwdR][fwdC] == EMPTY;
-        boolean bwdEmpty = inBounds(bwdR, bwdC) && board[bwdR][bwdC] == EMPTY;
-
-        return fwdEmpty || bwdEmpty;
-    }
-
-    private int countFoursAt(int[][] board, int row, int col, int player) {
-        int count = 0;
-        for (int[] dir : DIRECTIONS) {
-            if (isFourAt(board, row, col, dir[0], dir[1], player)) {
-                count++;
-            }
-        }
-        return count;
-    }
-
-    private boolean isForbiddenMove(int[][] board, int row, int col, int player) {
-        if (player != BLACK) return false;
-        if (board[row][col] != EMPTY) return false;
-
-        int[][] boardCopy = new int[BOARD_SIZE][BOARD_SIZE];
-        for (int r = 0; r < BOARD_SIZE; r++) {
-            System.arraycopy(board[r], 0, boardCopy[r], 0, BOARD_SIZE);
-        }
-        boardCopy[row][col] = player;
-
-        if (hasFiveAt(boardCopy, row, col, player)) return false;
-        if (hasOverlineAt(boardCopy, row, col, player)) return true;
-        if (countFoursAt(boardCopy, row, col, player) >= 2) return true;
-        if (countLiveThreesAt(boardCopy, row, col, player) >= 2) return true;
-
         return false;
     }
 

@@ -15,99 +15,140 @@ function createEmptyBoard(): BoardState {
 
 // --- Forbidden moves (禁手) for black ---
 
-function countDirection(board: BoardState, row: number, col: number, dr: number, dc: number, player: number): number {
-  let count = 0;
-  let r = row + dr;
-  let c = col + dc;
+const WINDOW = 6;
+
+function extractLine(board: BoardState, row: number, col: number, dr: number, dc: number, player: number): string {
+  let s = '';
+  for (let i = -WINDOW; i <= WINDOW; i++) {
+    const r = row + i * dr;
+    const c = col + i * dc;
+    if (r < 0 || r >= BOARD_SIZE || c < 0 || c >= BOARD_SIZE) {
+      s += '2';
+    } else if (board[r][c] === EMPTY) {
+      s += '0';
+    } else if (board[r][c] === player) {
+      s += '1';
+    } else {
+      s += '2';
+    }
+  }
+  return s;
+}
+
+const LIVE_FOUR_PATTERNS = [
+  /011110/,
+];
+
+const FOUR_PATTERNS = [
+  /11110/, /01111/,
+  /11011/, /10111/, /11101/,
+  /100111/, /111001/,
+  /101011/, /110101/,
+  /101101/,
+];
+
+const LIVE_THREE_PATTERNS = [
+  /0011100/, /001110/, /011100/,
+  /0101100/, /0011010/,
+  /0110100/, /0010110/,
+  /010110(?=0)/, /(?<=0)011010/,
+  /0100110/, /0110010/,
+];
+
+function matchAny(s: string, patterns: RegExp[]): boolean {
+  for (const p of patterns) {
+    if (p.test(s)) return true;
+  }
+  return false;
+}
+
+function countStonesInLine(board: BoardState, row: number, col: number, dr: number, dc: number, player: number): number {
+  let count = 1;
+  let r = row + dr, c = col + dc;
   while (r >= 0 && r < BOARD_SIZE && c >= 0 && c < BOARD_SIZE && board[r][c] === player) {
-    count++;
-    r += dr;
-    c += dc;
+    count++; r += dr; c += dc;
+  }
+  r = row - dr; c = col - dc;
+  while (r >= 0 && r < BOARD_SIZE && c >= 0 && c < BOARD_SIZE && board[r][c] === player) {
+    count++; r -= dr; c -= dc;
   }
   return count;
 }
 
-function getLineInfo(board: BoardState, row: number, col: number, dr: number, dc: number, player: number) {
-  const fwd = countDirection(board, row, col, dr, dc, player);
-  const bwd = countDirection(board, row, col, -dr, -dc, player);
-  const count = 1 + fwd + bwd;
-
-  const fwdR = row + dr * (fwd + 1);
-  const fwdC = col + dc * (fwd + 1);
-  const bwdR = row - dr * (bwd + 1);
-  const bwdC = col - dc * (bwd + 1);
-
-  const fwdEmpty = fwdR >= 0 && fwdR < BOARD_SIZE && fwdC >= 0 && fwdC < BOARD_SIZE && board[fwdR][fwdC] === EMPTY;
-  const bwdEmpty = bwdR >= 0 && bwdR < BOARD_SIZE && bwdC >= 0 && bwdC < BOARD_SIZE && board[bwdR][bwdC] === EMPTY;
-
-  return { count, fwd, bwd, fwdEmpty, bwdEmpty, fwdR, fwdC, bwdR, bwdC };
-}
-
-function isLiveThree(board: BoardState, row: number, col: number, dr: number, dc: number, player: number): boolean {
-  const info = getLineInfo(board, row, col, dr, dc, player);
-  if (info.count !== 3) return false;
-  if (!info.fwdEmpty || !info.bwdEmpty) return false;
-
-  const fwd2R = row + dr * (info.fwd + 2);
-  const fwd2C = col + dc * (info.fwd + 2);
-  const bwd2R = row - dr * (info.bwd + 2);
-  const bwd2C = col - dc * (info.bwd + 2);
-
-  const fwd2Empty = fwd2R >= 0 && fwd2R < BOARD_SIZE && fwd2C >= 0 && fwd2C < BOARD_SIZE && board[fwd2R][fwd2C] === EMPTY;
-  const bwd2Empty = bwd2R >= 0 && bwd2R < BOARD_SIZE && bwd2C >= 0 && bwd2C < BOARD_SIZE && board[bwd2R][bwd2C] === EMPTY;
-
-  if (fwd2Empty && bwd2Empty) return true;
-
-  if (info.fwd === 0 && info.bwd === 2) {
-    if (bwd2Empty && info.fwdEmpty) return true;
+function hasFiveAt(board: BoardState, row: number, col: number, player: number): boolean {
+  for (const [dr, dc] of DIRECTIONS) {
+    if (countStonesInLine(board, row, col, dr, dc, player) === 5) return true;
   }
-  if (info.bwd === 0 && info.fwd === 2) {
-    if (fwd2Empty && info.bwdEmpty) return true;
-  }
-
   return false;
 }
 
-function countLiveThrees(board: BoardState, row: number, col: number, player: number): number {
+function hasOverlineAt(board: BoardState, row: number, col: number, player: number): boolean {
+  for (const [dr, dc] of DIRECTIONS) {
+    if (countStonesInLine(board, row, col, dr, dc, player) >= 6) return true;
+  }
+  return false;
+}
+
+function countFoursAt(board: BoardState, row: number, col: number, player: number): number {
   let count = 0;
   for (const [dr, dc] of DIRECTIONS) {
-    if (isLiveThree(board, row, col, dr, dc, player)) {
+    const line = extractLine(board, row, col, dr, dc, player);
+    if (matchAny(line, FOUR_PATTERNS) || matchAny(line, LIVE_FOUR_PATTERNS)) {
       count++;
     }
   }
   return count;
 }
 
-function isFour(board: BoardState, row: number, col: number, dr: number, dc: number, player: number): boolean {
-  const info = getLineInfo(board, row, col, dr, dc, player);
-  if (info.count !== 4) return false;
-  return info.fwdEmpty || info.bwdEmpty;
+function isTrueLiveThree(board: BoardState, row: number, col: number, dr: number, dc: number, player: number): boolean {
+  for (let i = -5; i <= 5; i++) {
+    const r = row + i * dr;
+    const c = col + i * dc;
+    if (r < 0 || r >= BOARD_SIZE || c < 0 || c >= BOARD_SIZE) continue;
+    if (board[r][c] !== EMPTY) continue;
+    board[r][c] = player;
+    const lineAfter = extractLine(board, row, col, dr, dc, player);
+    let foundLiveFour = false;
+    if (matchAny(lineAfter, LIVE_FOUR_PATTERNS)) {
+      foundLiveFour = true;
+    } else if (matchAny(lineAfter, FOUR_PATTERNS)) {
+      outer:
+      for (let j = -5; j <= 5; j++) {
+        const r2 = row + j * dr;
+        const c2 = col + j * dc;
+        if (r2 < 0 || r2 >= BOARD_SIZE || c2 < 0 || c2 >= BOARD_SIZE) continue;
+        if (board[r2][c2] !== EMPTY) continue;
+        board[r2][c2] = player;
+        if (countStonesInLine(board, r2, c2, dr, dc, player) === 5) {
+          board[r2][c2] = EMPTY;
+          continue;
+        }
+        const l2 = extractLine(board, r, c, dr, dc, player);
+        if (matchAny(l2, LIVE_FOUR_PATTERNS)) {
+          foundLiveFour = true;
+        }
+        board[r2][c2] = EMPTY;
+        if (foundLiveFour) break outer;
+      }
+    }
+    board[r][c] = EMPTY;
+    if (foundLiveFour) return true;
+  }
+  return false;
 }
 
-function countFours(board: BoardState, row: number, col: number, player: number): number {
+function countLiveThreesAt(board: BoardState, row: number, col: number, player: number): number {
   let count = 0;
   for (const [dr, dc] of DIRECTIONS) {
-    if (isFour(board, row, col, dr, dc, player)) {
-      count++;
+    const line = extractLine(board, row, col, dr, dc, player);
+    if (matchAny(line, LIVE_THREE_PATTERNS)) {
+      const boardCopy = board.map(r => [...r]);
+      if (isTrueLiveThree(boardCopy, row, col, dr, dc, player)) {
+        count++;
+      }
     }
   }
   return count;
-}
-
-function hasOverline(board: BoardState, row: number, col: number, player: number): boolean {
-  for (const [dr, dc] of DIRECTIONS) {
-    const count = 1 + countDirection(board, row, col, dr, dc, player) + countDirection(board, row, col, -dr, -dc, player);
-    if (count >= 6) return true;
-  }
-  return false;
-}
-
-function hasFive(board: BoardState, row: number, col: number, player: number): boolean {
-  for (const [dr, dc] of DIRECTIONS) {
-    const count = 1 + countDirection(board, row, col, dr, dc, player) + countDirection(board, row, col, -dr, -dc, player);
-    if (count === 5) return true;
-  }
-  return false;
 }
 
 export function isForbiddenMove(board: BoardState, row: number, col: number, player: number): boolean {
@@ -117,14 +158,13 @@ export function isForbiddenMove(board: BoardState, row: number, col: number, pla
   const boardCopy = board.map(r => [...r]);
   boardCopy[row][col] = player;
 
-  if (hasFive(boardCopy, row, col, player)) return false;
+  if (hasFiveAt(boardCopy, row, col, player)) return false;
+  if (hasOverlineAt(boardCopy, row, col, player)) return true;
 
-  if (hasOverline(boardCopy, row, col, player)) return true;
-
-  const fourCount = countFours(boardCopy, row, col, player);
+  const fourCount = countFoursAt(boardCopy, row, col, player);
   if (fourCount >= 2) return true;
 
-  const threeCount = countLiveThrees(boardCopy, row, col, player);
+  const threeCount = countLiveThreesAt(boardCopy, row, col, player);
   if (threeCount >= 2) return true;
 
   return false;
@@ -136,9 +176,9 @@ export function getForbiddenReason(board: BoardState, row: number, col: number, 
   const boardCopy = board.map(r => [...r]);
   boardCopy[row][col] = player;
 
-  if (hasOverline(boardCopy, row, col, player)) return '长连禁手';
-  if (countFours(boardCopy, row, col, player) >= 2) return '四四禁手';
-  if (countLiveThrees(boardCopy, row, col, player) >= 2) return '三三禁手';
+  if (hasOverlineAt(boardCopy, row, col, player)) return '长连禁手';
+  if (countFoursAt(boardCopy, row, col, player) >= 2) return '四四禁手';
+  if (countLiveThreesAt(boardCopy, row, col, player) >= 2) return '三三禁手';
 
   return '禁手';
 }
@@ -156,6 +196,17 @@ const SCORE_TABLE: Record<string, number> = {
   'live-one': 100,
   'dead-one': 10,
 };
+
+function countDirection(board: BoardState, row: number, col: number, dr: number, dc: number, player: number): number {
+  let count = 0;
+  let r = row + dr, c = col + dc;
+  while (r >= 0 && r < BOARD_SIZE && c >= 0 && c < BOARD_SIZE && board[r][c] === player) {
+    count++;
+    r += dr;
+    c += dc;
+  }
+  return count;
+}
 
 function isBlocked(board: BoardState, row: number, col: number, dr: number, dc: number, steps: number): boolean {
   const r = row + dr * steps;
