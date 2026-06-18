@@ -7,8 +7,140 @@ const EMPTY = 0;
 const BLACK = 1;
 const WHITE = 2;
 
+const DIRECTIONS = [[0, 1], [1, 0], [1, 1], [1, -1]];
+
 function createEmptyBoard(): BoardState {
   return Array.from({ length: BOARD_SIZE }, () => Array(BOARD_SIZE).fill(EMPTY));
+}
+
+// --- Forbidden moves (禁手) for black ---
+
+function countDirection(board: BoardState, row: number, col: number, dr: number, dc: number, player: number): number {
+  let count = 0;
+  let r = row + dr;
+  let c = col + dc;
+  while (r >= 0 && r < BOARD_SIZE && c >= 0 && c < BOARD_SIZE && board[r][c] === player) {
+    count++;
+    r += dr;
+    c += dc;
+  }
+  return count;
+}
+
+function getLineInfo(board: BoardState, row: number, col: number, dr: number, dc: number, player: number) {
+  const fwd = countDirection(board, row, col, dr, dc, player);
+  const bwd = countDirection(board, row, col, -dr, -dc, player);
+  const count = 1 + fwd + bwd;
+
+  const fwdR = row + dr * (fwd + 1);
+  const fwdC = col + dc * (fwd + 1);
+  const bwdR = row - dr * (bwd + 1);
+  const bwdC = col - dc * (bwd + 1);
+
+  const fwdEmpty = fwdR >= 0 && fwdR < BOARD_SIZE && fwdC >= 0 && fwdC < BOARD_SIZE && board[fwdR][fwdC] === EMPTY;
+  const bwdEmpty = bwdR >= 0 && bwdR < BOARD_SIZE && bwdC >= 0 && bwdC < BOARD_SIZE && board[bwdR][bwdC] === EMPTY;
+
+  return { count, fwd, bwd, fwdEmpty, bwdEmpty, fwdR, fwdC, bwdR, bwdC };
+}
+
+function isLiveThree(board: BoardState, row: number, col: number, dr: number, dc: number, player: number): boolean {
+  const info = getLineInfo(board, row, col, dr, dc, player);
+  if (info.count !== 3) return false;
+  if (!info.fwdEmpty || !info.bwdEmpty) return false;
+
+  const fwd2R = row + dr * (info.fwd + 2);
+  const fwd2C = col + dc * (info.fwd + 2);
+  const bwd2R = row - dr * (info.bwd + 2);
+  const bwd2C = col - dc * (info.bwd + 2);
+
+  const fwd2Empty = fwd2R >= 0 && fwd2R < BOARD_SIZE && fwd2C >= 0 && fwd2C < BOARD_SIZE && board[fwd2R][fwd2C] === EMPTY;
+  const bwd2Empty = bwd2R >= 0 && bwd2R < BOARD_SIZE && bwd2C >= 0 && bwd2C < BOARD_SIZE && board[bwd2R][bwd2C] === EMPTY;
+
+  if (fwd2Empty && bwd2Empty) return true;
+
+  if (info.fwd === 0 && info.bwd === 2) {
+    if (bwd2Empty && info.fwdEmpty) return true;
+  }
+  if (info.bwd === 0 && info.fwd === 2) {
+    if (fwd2Empty && info.bwdEmpty) return true;
+  }
+
+  return false;
+}
+
+function countLiveThrees(board: BoardState, row: number, col: number, player: number): number {
+  let count = 0;
+  for (const [dr, dc] of DIRECTIONS) {
+    if (isLiveThree(board, row, col, dr, dc, player)) {
+      count++;
+    }
+  }
+  return count;
+}
+
+function isFour(board: BoardState, row: number, col: number, dr: number, dc: number, player: number): boolean {
+  const info = getLineInfo(board, row, col, dr, dc, player);
+  if (info.count !== 4) return false;
+  return info.fwdEmpty || info.bwdEmpty;
+}
+
+function countFours(board: BoardState, row: number, col: number, player: number): number {
+  let count = 0;
+  for (const [dr, dc] of DIRECTIONS) {
+    if (isFour(board, row, col, dr, dc, player)) {
+      count++;
+    }
+  }
+  return count;
+}
+
+function hasOverline(board: BoardState, row: number, col: number, player: number): boolean {
+  for (const [dr, dc] of DIRECTIONS) {
+    const count = 1 + countDirection(board, row, col, dr, dc, player) + countDirection(board, row, col, -dr, -dc, player);
+    if (count >= 6) return true;
+  }
+  return false;
+}
+
+function hasFive(board: BoardState, row: number, col: number, player: number): boolean {
+  for (const [dr, dc] of DIRECTIONS) {
+    const count = 1 + countDirection(board, row, col, dr, dc, player) + countDirection(board, row, col, -dr, -dc, player);
+    if (count === 5) return true;
+  }
+  return false;
+}
+
+export function isForbiddenMove(board: BoardState, row: number, col: number, player: number): boolean {
+  if (player !== BLACK) return false;
+  if (board[row][col] !== EMPTY) return false;
+
+  const boardCopy = board.map(r => [...r]);
+  boardCopy[row][col] = player;
+
+  if (hasFive(boardCopy, row, col, player)) return false;
+
+  if (hasOverline(boardCopy, row, col, player)) return true;
+
+  const fourCount = countFours(boardCopy, row, col, player);
+  if (fourCount >= 2) return true;
+
+  const threeCount = countLiveThrees(boardCopy, row, col, player);
+  if (threeCount >= 2) return true;
+
+  return false;
+}
+
+export function getForbiddenReason(board: BoardState, row: number, col: number, player: number): string | null {
+  if (!isForbiddenMove(board, row, col, player)) return null;
+
+  const boardCopy = board.map(r => [...r]);
+  boardCopy[row][col] = player;
+
+  if (hasOverline(boardCopy, row, col, player)) return '长连禁手';
+  if (countFours(boardCopy, row, col, player) >= 2) return '四四禁手';
+  if (countLiveThrees(boardCopy, row, col, player) >= 2) return '三三禁手';
+
+  return '禁手';
 }
 
 // --- AI: Minimax + Alpha-Beta Pruning ---
@@ -24,20 +156,6 @@ const SCORE_TABLE: Record<string, number> = {
   'live-one': 100,
   'dead-one': 10,
 };
-
-const DIRECTIONS = [[0, 1], [1, 0], [1, 1], [1, -1]];
-
-function countDirection(board: BoardState, row: number, col: number, dr: number, dc: number, player: number): number {
-  let count = 0;
-  let r = row + dr;
-  let c = col + dc;
-  while (r >= 0 && r < BOARD_SIZE && c >= 0 && c < BOARD_SIZE && board[r][c] === player) {
-    count++;
-    r += dr;
-    c += dc;
-  }
-  return count;
-}
 
 function isBlocked(board: BoardState, row: number, col: number, dr: number, dc: number, steps: number): boolean {
   const r = row + dr * steps;
@@ -90,7 +208,7 @@ function evaluateBoard(board: BoardState, aiPlayer: number): number {
   return aiScore - humanScore * 1.1;
 }
 
-function getCandidateMoves(board: BoardState): [number, number][] {
+function getCandidateMoves(board: BoardState, player: number = BLACK): [number, number][] {
   const candidates: [number, number][] = [];
   const visited = new Set<string>();
 
@@ -103,6 +221,7 @@ function getCandidateMoves(board: BoardState): [number, number][] {
             const nc = c + dc;
             const key = `${nr},${nc}`;
             if (nr >= 0 && nr < BOARD_SIZE && nc >= 0 && nc < BOARD_SIZE && board[nr][nc] === EMPTY && !visited.has(key)) {
+              if (player === BLACK && isForbiddenMove(board, nr, nc, player)) continue;
               visited.add(key);
               candidates.push([nr, nc]);
             }
@@ -112,7 +231,9 @@ function getCandidateMoves(board: BoardState): [number, number][] {
     }
   }
   if (candidates.length === 0 && board[7][7] === EMPTY) {
-    candidates.push([7, 7]);
+    if (!(player === BLACK && isForbiddenMove(board, 7, 7, player))) {
+      candidates.push([7, 7]);
+    }
   }
   return candidates;
 }
@@ -130,7 +251,8 @@ function minimax(board: BoardState, depth: number, alpha: number, beta: number, 
 
   if (depth === 0) return evaluateBoard(board, aiPlayer);
 
-  const candidates = getCandidateMoves(board);
+  const currentPlayer = isMaximizing ? aiPlayer : humanPlayer;
+  const candidates = getCandidateMoves(board, currentPlayer);
   if (candidates.length === 0) return evaluateBoard(board, aiPlayer);
 
   if (isMaximizing) {
@@ -167,7 +289,7 @@ function minimax(board: BoardState, depth: number, alpha: number, beta: number, 
 }
 
 function getAIMove(board: BoardState, aiPlayer: number, depth: number): [number, number] | null {
-  const candidates = getCandidateMoves(board);
+  const candidates = getCandidateMoves(board, aiPlayer);
   if (candidates.length === 0) return null;
 
   let bestMove: [number, number] = candidates[0];
@@ -200,6 +322,7 @@ export const useGameStore = defineStore('game', () => {
   const gameRecords = ref<GameRecord[]>([]);
   const aiConfig = ref<AIConfig>({ depth: 3, enabled: true, playerColor: WHITE });
   const isAiThinking = ref(false);
+  const forbiddenMessage = ref<string | null>(null);
 
   // Replay
   const replayMoves = ref<Move[]>([]);
@@ -218,12 +341,19 @@ export const useGameStore = defineStore('game', () => {
     status.value = 'playing';
     winner.value = null;
     isAiThinking.value = false;
+    forbiddenMessage.value = null;
   }
 
   function placeStone(row: number, col: number): boolean {
     if (status.value !== 'playing') return false;
     if (board.value[row][col] !== EMPTY) return false;
     if (isAiThinking.value) return false;
+
+    if (isForbiddenMove(board.value, row, col, currentPlayer.value)) {
+      forbiddenMessage.value = getForbiddenReason(board.value, row, col, currentPlayer.value);
+      return false;
+    }
+    forbiddenMessage.value = null;
 
     board.value[row][col] = currentPlayer.value;
     const move: Move = { row, col, player: currentPlayer.value, timestamp: Date.now() };
@@ -356,7 +486,7 @@ export const useGameStore = defineStore('game', () => {
   }
 
   return {
-    board, currentPlayer, moves, status, winner, gameRecords, aiConfig, isAiThinking,
+    board, currentPlayer, moves, status, winner, gameRecords, aiConfig, isAiThinking, forbiddenMessage,
     replayMoves, replayIndex, replayBoard, isReplayPlaying, replaySpeed,
     currentMoveCount, isGameOver,
     startGame, placeStone, aiMove, saveRecord,

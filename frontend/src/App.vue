@@ -40,6 +40,9 @@
                 {{ store.winner === 1 ? '黑棋胜' : store.winner === 2 ? '白棋胜' : '平局' }}
               </span>
             </div>
+            <div v-if="store.forbiddenMessage" class="mt-2 p-2 bg-red-900/50 border border-red-700 rounded text-red-300 text-sm text-center">
+              ⚠️ {{ store.forbiddenMessage }}
+            </div>
           </div>
 
           <div class="mt-4 flex gap-2">

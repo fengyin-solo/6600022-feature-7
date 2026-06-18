@@ -25,7 +25,7 @@ public class AiService {
     private static final int DEAD_ONE = 10;
 
     public int[] getBestMove(int[][] board, int aiPlayer, int depth) {
-        List<int[]> candidates = getCandidateMoves(board);
+        List<int[]> candidates = getCandidateMoves(board, aiPlayer);
         if (candidates.isEmpty()) return null;
 
         int[] bestMove = candidates.get(0);
@@ -52,7 +52,8 @@ public class AiService {
 
         if (depth == 0) return evaluateBoard(board, aiPlayer);
 
-        List<int[]> candidates = getCandidateMoves(board);
+        int currentPlayer = isMaximizing ? aiPlayer : humanPlayer;
+        List<int[]> candidates = getCandidateMoves(board, currentPlayer);
         if (candidates.isEmpty()) return evaluateBoard(board, aiPlayer);
 
         if (isMaximizing) {
@@ -151,7 +152,116 @@ public class AiService {
         return false;
     }
 
-    private List<int[]> getCandidateMoves(int[][] board) {
+    private boolean hasFiveAt(int[][] board, int row, int col, int player) {
+        for (int[] dir : DIRECTIONS) {
+            int count = 1 + countDirection(board, row, col, dir[0], dir[1], player) + countDirection(board, row, col, -dir[0], -dir[1], player);
+            if (count == 5) return true;
+        }
+        return false;
+    }
+
+    private boolean hasOverlineAt(int[][] board, int row, int col, int player) {
+        for (int[] dir : DIRECTIONS) {
+            int count = 1 + countDirection(board, row, col, dir[0], dir[1], player) + countDirection(board, row, col, -dir[0], -dir[1], player);
+            if (count >= 6) return true;
+        }
+        return false;
+    }
+
+    private boolean isLiveThreeAt(int[][] board, int row, int col, int dr, int dc, int player) {
+        int fwd = countDirection(board, row, col, dr, dc, player);
+        int bwd = countDirection(board, row, col, -dr, -dc, player);
+        int count = 1 + fwd + bwd;
+
+        if (count != 3) return false;
+
+        int fwdR = row + dr * (fwd + 1);
+        int fwdC = col + dc * (fwd + 1);
+        int bwdR = row - dr * (bwd + 1);
+        int bwdC = col - dc * (bwd + 1);
+
+        boolean fwdEmpty = inBounds(fwdR, fwdC) && board[fwdR][fwdC] == EMPTY;
+        boolean bwdEmpty = inBounds(bwdR, bwdC) && board[bwdR][bwdC] == EMPTY;
+
+        if (!fwdEmpty || !bwdEmpty) return false;
+
+        int fwd2R = row + dr * (fwd + 2);
+        int fwd2C = col + dc * (fwd + 2);
+        int bwd2R = row - dr * (bwd + 2);
+        int bwd2C = col - dc * (bwd + 2);
+
+        boolean fwd2Empty = inBounds(fwd2R, fwd2C) && board[fwd2R][fwd2C] == EMPTY;
+        boolean bwd2Empty = inBounds(bwd2R, bwd2C) && board[bwd2R][bwd2C] == EMPTY;
+
+        if (fwd2Empty && bwd2Empty) return true;
+
+        if (fwd == 0 && bwd == 2) {
+            if (bwd2Empty && fwdEmpty) return true;
+        }
+        if (bwd == 0 && fwd == 2) {
+            if (fwd2Empty && bwdEmpty) return true;
+        }
+
+        return false;
+    }
+
+    private int countLiveThreesAt(int[][] board, int row, int col, int player) {
+        int count = 0;
+        for (int[] dir : DIRECTIONS) {
+            if (isLiveThreeAt(board, row, col, dir[0], dir[1], player)) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private boolean isFourAt(int[][] board, int row, int col, int dr, int dc, int player) {
+        int fwd = countDirection(board, row, col, dr, dc, player);
+        int bwd = countDirection(board, row, col, -dr, -dc, player);
+        int count = 1 + fwd + bwd;
+
+        if (count != 4) return false;
+
+        int fwdR = row + dr * (fwd + 1);
+        int fwdC = col + dc * (fwd + 1);
+        int bwdR = row - dr * (bwd + 1);
+        int bwdC = col - dc * (bwd + 1);
+
+        boolean fwdEmpty = inBounds(fwdR, fwdC) && board[fwdR][fwdC] == EMPTY;
+        boolean bwdEmpty = inBounds(bwdR, bwdC) && board[bwdR][bwdC] == EMPTY;
+
+        return fwdEmpty || bwdEmpty;
+    }
+
+    private int countFoursAt(int[][] board, int row, int col, int player) {
+        int count = 0;
+        for (int[] dir : DIRECTIONS) {
+            if (isFourAt(board, row, col, dir[0], dir[1], player)) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private boolean isForbiddenMove(int[][] board, int row, int col, int player) {
+        if (player != BLACK) return false;
+        if (board[row][col] != EMPTY) return false;
+
+        int[][] boardCopy = new int[BOARD_SIZE][BOARD_SIZE];
+        for (int r = 0; r < BOARD_SIZE; r++) {
+            System.arraycopy(board[r], 0, boardCopy[r], 0, BOARD_SIZE);
+        }
+        boardCopy[row][col] = player;
+
+        if (hasFiveAt(boardCopy, row, col, player)) return false;
+        if (hasOverlineAt(boardCopy, row, col, player)) return true;
+        if (countFoursAt(boardCopy, row, col, player) >= 2) return true;
+        if (countLiveThreesAt(boardCopy, row, col, player) >= 2) return true;
+
+        return false;
+    }
+
+    private List<int[]> getCandidateMoves(int[][] board, int player) {
         List<int[]> candidates = new ArrayList<>();
         Set<String> visited = new HashSet<>();
 
@@ -163,6 +273,7 @@ public class AiService {
                             int nr = r + dr, nc = c + dc;
                             String key = nr + "," + nc;
                             if (inBounds(nr, nc) && board[nr][nc] == EMPTY && !visited.contains(key)) {
+                                if (player == BLACK && isForbiddenMove(board, nr, nc, player)) continue;
                                 visited.add(key);
                                 candidates.add(new int[]{nr, nc});
                             }
@@ -173,7 +284,9 @@ public class AiService {
         }
 
         if (candidates.isEmpty() && board[7][7] == EMPTY) {
-            candidates.add(new int[]{7, 7});
+            if (!(player == BLACK && isForbiddenMove(board, 7, 7, player))) {
+                candidates.add(new int[]{7, 7});
+            }
         }
         return candidates;
     }
